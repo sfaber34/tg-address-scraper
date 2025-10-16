@@ -5,7 +5,7 @@
   "main": "bot.js",
   "license": "MIT",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node tg-address-scraper.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
