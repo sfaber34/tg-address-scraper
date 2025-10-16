@@ -94,12 +94,10 @@ async function handleHelp(ctx) {
 
 /help - Show this help message
 /whoami - Show your Telegram ID
-/watch - Start watching this channel for ETH addresses and ENS names
-/stop - Stop watching this channel for ETH addresses and ENS names
 /status - Show collection statistics
 /makelist - Send collected addresses to DM
 
-🤖 This bot automatically collects ETH addresses and ENS names from channel posts.`;
+🤖 This bot automatically collects ETH addresses and ENS names from all posts.`;
   
   await ctx.reply(helpMessage);
 }
@@ -108,34 +106,6 @@ async function handleWhoami(ctx) {
   const source = ctx.channelPost ? 'channel' : `user ${ctx.from?.id}`;
   console.log(`[CMD] /whoami from ${source} in chat ${ctx.chat.id}`);
   await ctx.reply(`Your Telegram ID: ${ctx.from?.id ?? 'Channel Post (no user ID)'}`);
-}
-
-async function handleWatch(ctx) {
-  const source = ctx.channelPost ? 'channel' : `user ${ctx.from?.id}`;
-  console.log(`[CMD] /watch from ${source} in chat ${ctx.chat.id}`);
-  if (!ownerOnly(ctx)) {
-    console.log(`[CMD] /watch rejected - not owner`);
-    return;
-  }
-  const chatId = ctx.chat.id;
-  const chatState = ensureChat(chatId);
-  chatState.watching = true;
-  console.log(`[CMD] Now watching chat ${chatId}`);
-  await ctx.reply('Watching this chat. I will collect ETH addresses and ENS names from messages going forward.');
-}
-
-async function handleStop(ctx) {
-  const source = ctx.channelPost ? 'channel' : `user ${ctx.from?.id}`;
-  console.log(`[CMD] /stop from ${source} in chat ${ctx.chat.id}`);
-  if (!ownerOnly(ctx)) {
-    console.log(`[CMD] /stop rejected - not owner`);
-    return;
-  }
-  const chatId = ctx.chat.id;
-  const chatState = ensureChat(chatId);
-  chatState.watching = false;
-  console.log(`[CMD] Stopped watching chat ${chatId}`);
-  await ctx.reply('Stopped watching this chat.');
 }
 
 async function handleStatus(ctx) {
@@ -247,26 +217,24 @@ async function handleMakeList(ctx) {
 // --- Bot setup ---
 const bot = new Telegraf(botToken);
 
-// Auto-watch when bot is added to a channel
+// Auto-watch when bot is added to a channel or group
 bot.on('my_chat_member', async (ctx) => {
   const { old_chat_member, new_chat_member } = ctx.myChatMember;
   const wasNotMember = ['left', 'kicked'].includes(old_chat_member?.status);
   const isNowMember = ['member', 'administrator', 'creator'].includes(new_chat_member?.status);
   
-  // Check if bot was just added to a channel
-  if (wasNotMember && isNowMember && ctx.chat.type === 'channel') {
+  // Check if bot was just added to a channel or group
+  if (wasNotMember && isNowMember && ['channel', 'group', 'supergroup'].includes(ctx.chat.type)) {
     const chatId = ctx.chat.id;
     const chatState = ensureChat(chatId);
     chatState.watching = true;
-    console.log(`[AUTO] Bot added to channel ${chatId} (${ctx.chat.title}). Auto-started watching.`);
+    console.log(`[AUTO] Bot added to ${ctx.chat.type} ${chatId} (${ctx.chat.title}). Auto-started watching.`);
   }
 });
 
 // Register commands for regular messages (DMs, groups, supergroups)
 bot.command('help', handleHelp);
 bot.command('whoami', handleWhoami);
-bot.command('watch', handleWatch);
-bot.command('stop', handleStop);
 bot.command('status', handleStatus);
 bot.command('makelist', handleMakeList);
 
@@ -319,8 +287,6 @@ bot.on('channel_post', async (ctx) => {
   // Check if this is a command
   if (isCmd(text, 'help')) return handleHelp(ctx);
   if (isCmd(text, 'whoami')) return handleWhoami(ctx);
-  if (isCmd(text, 'watch')) return handleWatch(ctx);
-  if (isCmd(text, 'stop')) return handleStop(ctx);
   if (isCmd(text, 'status')) return handleStatus(ctx);
   if (isCmd(text, 'makelist')) return handleMakeList(ctx);
   
