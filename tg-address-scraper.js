@@ -2,11 +2,18 @@ import 'dotenv/config';
 import { Telegraf } from 'telegraf';
 
 const botToken = process.env.BOT_TOKEN;
-const ownerTelegramId = Number(process.env.OWNER_TELEGRAM_ID);
-if (!botToken || !ownerTelegramId) {
+// Support multiple owners: comma-separated list of Telegram IDs
+const ownerTelegramIds = process.env.OWNER_TELEGRAM_ID
+  ? process.env.OWNER_TELEGRAM_ID.split(',').map(id => Number(id.trim())).filter(id => !isNaN(id))
+  : [];
+
+if (!botToken || ownerTelegramIds.length === 0) {
   console.error('Missing BOT_TOKEN or OWNER_TELEGRAM_ID in .env');
+  console.error('OWNER_TELEGRAM_ID should be one or more Telegram IDs (comma-separated for multiple owners)');
   process.exit(1);
 }
+
+console.log(`✓ Bot configured with ${ownerTelegramIds.length} owner(s): ${ownerTelegramIds.join(', ')}`);
 
 let useEns = false;
 let publicClient = null;
@@ -60,8 +67,8 @@ function ownerOnly(ctx) {
   if (ctx.channelPost) {
     return true; // Allow all channel posts (only admins can post anyway)
   }
-  // For regular messages, check if it's the owner
-  return ctx.from && ctx.from.id === ownerTelegramId;
+  // For regular messages, check if user is one of the owners
+  return ctx.from && ownerTelegramIds.includes(ctx.from.id);
 }
 
 // Helper to check if text is a command
@@ -181,33 +188,46 @@ async function handleMakeList(ctx) {
   const header = `📋 Collected Addresses from ${chatName}\n(${ethCount} ETH + ${ensResolvedCount} resolved ENS = ${addresses.length} unique)\n\n`;
   const content = header + addresses.join('\n');
 
+  // Determine who to send the DM to
+  // For channel posts (ctx.from is undefined), send to all owners
+  // For regular messages, send to the user who requested it
+  const recipients = ctx.channelPost ? ownerTelegramIds : [ctx.from.id];
+
   try {
-    // Send as regular message (split if too long)
-    if (content.length <= 4096) {
-      await ctx.telegram.sendMessage(ownerTelegramId, content);
-      console.log(`[CMD] List sent to owner ${ownerTelegramId}`);
-    } else {
-      // If message is too long, split it into chunks
-      const chunks = [];
-      const maxLength = 4096;
-      let currentChunk = header;
-      
-      for (const addr of addresses) {
-        if ((currentChunk + addr + '\n').length > maxLength) {
-          chunks.push(currentChunk);
-          currentChunk = addr + '\n';
-        } else {
-          currentChunk += addr + '\n';
+    // Send to each recipient
+    for (const recipientId of recipients) {
+      // Send as regular message (split if too long)
+      if (content.length <= 4096) {
+        await ctx.telegram.sendMessage(recipientId, content);
+        console.log(`[CMD] List sent to user ${recipientId}`);
+      } else {
+        // If message is too long, split it into chunks
+        const chunks = [];
+        const maxLength = 4096;
+        let currentChunk = header;
+        
+        for (const addr of addresses) {
+          if ((currentChunk + addr + '\n').length > maxLength) {
+            chunks.push(currentChunk);
+            currentChunk = addr + '\n';
+          } else {
+            currentChunk += addr + '\n';
+          }
         }
+        if (currentChunk) chunks.push(currentChunk);
+        
+        for (let i = 0; i < chunks.length; i++) {
+          await ctx.telegram.sendMessage(recipientId, `Part ${i + 1}/${chunks.length}:\n\n${chunks[i]}`);
+        }
+        console.log(`[CMD] List sent to user ${recipientId} in ${chunks.length} parts`);
       }
-      if (currentChunk) chunks.push(currentChunk);
-      
-      for (let i = 0; i < chunks.length; i++) {
-        await ctx.telegram.sendMessage(ownerTelegramId, `Part ${i + 1}/${chunks.length}:\n\n${chunks[i]}`);
-      }
-      console.log(`[CMD] List sent to owner ${ownerTelegramId} in ${chunks.length} parts`);
     }
-    await ctx.reply('Sent you a DM with the results.');
+    
+    if (ctx.channelPost) {
+      await ctx.reply(`Sent list to ${recipients.length} owner(s) via DM.`);
+    } else {
+      await ctx.reply('Sent you a DM with the results.');
+    }
   } catch (err) {
     console.error(`[CMD] Failed to send list: ${err.message}`);
     await ctx.reply('Failed to DM results. (Is the bot allowed to message you? Send /start to the bot in DM once.)');
