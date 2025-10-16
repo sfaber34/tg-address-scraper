@@ -150,10 +150,14 @@ async function handleMakeList(ctx) {
     addressSet.add(addr.toLowerCase());
   }
   
+  // Track ENS -> address mappings for display
+  const ensResolutions = [];
+  
   // Add resolved ENS addresses (skip unresolved ENS names)
   for (const [name, maybeResolved] of chatState.ensMap.entries()) {
     if (maybeResolved) {
       addressSet.add(maybeResolved.toLowerCase());
+      ensResolutions.push({ name, address: maybeResolved.toLowerCase() });
     }
   }
 
@@ -169,9 +173,19 @@ async function handleMakeList(ctx) {
         return addr; // Fallback to original if invalid
       }
     });
+    
+    // Also checksum the ENS resolution addresses
+    ensResolutions.forEach(ens => {
+      try {
+        ens.address = getAddress(ens.address);
+      } catch (e) {
+        // Keep original if invalid
+      }
+    });
   }
   
   addresses.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  ensResolutions.sort((a, b) => a.name.localeCompare(b.name));
   
   const ethCount = chatState.ethSet.size;
   const ensResolvedCount = Array.from(chatState.ensMap.values()).filter(v => v !== null).length;
@@ -183,10 +197,24 @@ async function handleMakeList(ctx) {
     return;
   }
 
-  // Format message with header and addresses
+  // Format message with header, ENS resolutions, then final list
   const chatName = ctx.chat.title || `Chat ${chatId}`;
-  const header = `📋 Collected Addresses from ${chatName}\n(${ethCount} ETH + ${ensResolvedCount} resolved ENS = ${addresses.length} unique)\n\n`;
-  const content = header + addresses.join('\n');
+  let content = `📊 Collected Addresses from ${chatName}\n(${ethCount} ETH + ${ensResolvedCount} resolved ENS = ${addresses.length} unique)\n\n`;
+  
+  // ENS resolutions section first (if any)
+  if (ensResolutions.length > 0) {
+    content += `🔍 ENS Resolutions:\n`;
+    for (const ens of ensResolutions) {
+      content += `${ens.name} → ${ens.address}\n`;
+    }
+    content += '\n';
+  }
+  
+  // Resolved final list section last (for easy copy/paste)
+  content += `✅ Resolved Final List:\n${addresses.join('\n')}`;
+  
+  // Remove trailing newline
+  content = content.trim();
 
   // Determine who to send the DM to
   // For channel posts (ctx.from is undefined), send to all owners
@@ -201,25 +229,50 @@ async function handleMakeList(ctx) {
         await ctx.telegram.sendMessage(recipientId, content);
         console.log(`[CMD] List sent to user ${recipientId}`);
       } else {
-        // If message is too long, split it into chunks
-        const chunks = [];
-        const maxLength = 4096;
-        let currentChunk = header;
+        // If message is too long, split into multiple parts
+        // Split by sections to keep formatting clean
+        const headerPart = `📊 Collected Addresses from ${chatName}\n(${ethCount} ETH + ${ensResolvedCount} resolved ENS = ${addresses.length} unique)\n\n`;
+        
+        // Send header first
+        await ctx.telegram.sendMessage(recipientId, headerPart + '⚠️ List is long, sending in multiple parts...');
+        
+        const maxLength = 4000; // Leave room for headers
+        
+        // Send ENS resolutions first (if any)
+        if (ensResolutions.length > 0) {
+          let ensChunk = '🔍 ENS Resolutions:\n';
+          for (const ens of ensResolutions) {
+            const line = `${ens.name} → ${ens.address}\n`;
+            if ((ensChunk + line).length > maxLength) {
+              await ctx.telegram.sendMessage(recipientId, ensChunk);
+              ensChunk = '🔍 ENS Resolutions (cont.):\n' + line;
+            } else {
+              ensChunk += line;
+            }
+          }
+          if (ensChunk.length > 25) {
+            await ctx.telegram.sendMessage(recipientId, ensChunk);
+          }
+        }
+        
+        // Send addresses last in chunks (for easy copy/paste)
+        let currentChunk = '✅ Resolved Final List:\n';
         
         for (const addr of addresses) {
           if ((currentChunk + addr + '\n').length > maxLength) {
-            chunks.push(currentChunk);
-            currentChunk = addr + '\n';
+            await ctx.telegram.sendMessage(recipientId, currentChunk);
+            currentChunk = '✅ Resolved Final List (cont.):\n' + addr + '\n';
           } else {
             currentChunk += addr + '\n';
           }
         }
-        if (currentChunk) chunks.push(currentChunk);
         
-        for (let i = 0; i < chunks.length; i++) {
-          await ctx.telegram.sendMessage(recipientId, `Part ${i + 1}/${chunks.length}:\n\n${chunks[i]}`);
+        // Send remaining addresses
+        if (currentChunk.length > 30) { // More than just the header
+          await ctx.telegram.sendMessage(recipientId, currentChunk);
         }
-        console.log(`[CMD] List sent to user ${recipientId} in ${chunks.length} parts`);
+        
+        console.log(`[CMD] List sent to user ${recipientId} in multiple parts`);
       }
     }
     
