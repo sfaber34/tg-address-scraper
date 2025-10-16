@@ -2,14 +2,18 @@
   "name": "tg-address-scraper",
   "version": "1.0.0",
   "type": "module",
-  "main": "bot.js",
+  "main": "tg-address-scraper.js",
   "license": "MIT",
   "scripts": {
     "start": "node tg-address-scraper.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
+    "dotenv": "^17.2.3",
     "telegraf": "^4.16.3",
     "viem": "^2.13.0"
-  }
+  },
+  "description": "a bot to scrape eth addresses from a telegram",
+  "repository": "https://github.com/sfaber34/tg-address-scraper.git",
+  "author": "Spencer Faber <sfaber34@gmail.com>",
+  "private": false
 }
